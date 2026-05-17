@@ -14,8 +14,8 @@ GUILD_ID = "777271906486976512"
 
 # Hardcoded Home Channels
 VC_ONE_ID = "1292895439531671613"
-VC_TWO_ID = "1465180321124454486"
-VC_THREE_ID = "1388555164708900955"
+VC_TWO_ID = "1505201571577987132"
+VC_THREE_ID = "1505201571577987132"
 
 tokens = {
     "Sentinel-1": {"token": os.getenv("TOKEN_ONE"), "channel": VC_ONE_ID, "mobile": False, "spam": True},
