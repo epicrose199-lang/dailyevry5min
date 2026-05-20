@@ -14,7 +14,7 @@ GUILD_ID = "777271906486976512"
 MY_USER_ID = "1404189983807639672"
 
 # Hardcoded Home VCs for locking
-VC_ONE_ID = "1489198958759903232"
+VC_ONE_ID = "1505201571577987132"
 VC_TWO_ID = "1465180321124454486"
 VC_THREE_ID = "1489198958759903232"
 
@@ -22,7 +22,7 @@ VC_THREE_ID = "1489198958759903232"
 SPAM_CHANNEL_ID = "1487672527370322132"
 
 tokens = {
-    "Sentinel-1": {"token": os.getenv("TOKEN_ONE"), "channel": VC_ONE_ID, "mobile": False, "spam": True},
+    "Sentinel-1": {"token": os.getenv("TOKEN_ONE"), "channel": VC_ONE_ID, "mobile": True, "spam": True},
     "Sentinel-2": {"token": os.getenv("TOKEN_TWO"), "channel": VC_TWO_ID, "mobile": False, "spam": False},
     "Sentinel-3": {"token": os.getenv("TOKEN_THREE"), "channel": VC_THREE_ID, "mobile": True, "spam": True}
 }
