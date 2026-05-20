@@ -43,7 +43,7 @@ def spammer_worker(token, name):
                 wait = res.json().get('retry_after', 5)
                 time.sleep(wait)
             else:
-                time.sleep(10)
+                time.sleep(11)
         except:
             time.sleep(10)
 
@@ -207,4 +207,4 @@ if __name__ == "__main__":
             time.sleep(random.randint(5, 15))
             
     while True: time.sleep(1)
-            
+        
