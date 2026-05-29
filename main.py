@@ -13,10 +13,14 @@ def run_web():
 GUILD_ID = "777271906486976512"
 MY_USER_ID = "1404189983807639672"
 
+# 🟢 CUSTOMIZABLE STATUS 🟢
+# Options: "online", "idle", "dnd", "invisible" (for offline)
+STATUS = "invisible" 
+
 # Hardcoded Home VCs for locking
-VC_ONE_ID = "1489198958759903232"
+VC_ONE_ID = "1505201571577987132"
 VC_TWO_ID = "1487672527370322132"
-VC_THREE_ID = "1489198958759903232"
+VC_THREE_ID = "1505201571577987132"
 
 # New Target Channel for background text spamming (Sentinel-1 and Sentinel-3)
 SPAM_CHANNEL_ID = "1487672527370322132"
@@ -110,7 +114,8 @@ def vc_locker(token, home_channel, name, is_mobile):
                 "d": {
                     "token": token.strip(), 
                     "properties": properties,
-                    "presence": {"status": "online", "afk": False}
+                    # Dynamic status pulled from global variable
+                    "presence": {"status": STATUS, "afk": False} 
                 }
             }))
 
@@ -142,7 +147,7 @@ def vc_locker(token, home_channel, name, is_mobile):
 
                 if t == "READY":
                     user_id = d['user']['id']
-                    print(f"✅ {name} online.")
+                    print(f"✅ {name} online (Status: {STATUS}).")
                     # Fallback backup join command once session state confirms active
                     time.sleep(1)
                     ws.send(json.dumps(join_payload))
@@ -207,4 +212,4 @@ if __name__ == "__main__":
             time.sleep(random.randint(5, 15))
             
     while True: time.sleep(1)
-        
+            
