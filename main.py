@@ -23,7 +23,7 @@ VC_TWO_ID = "1465180321124454486"
 VC_THREE_ID = "1505201571577987132"
 
 # New Target Channel for background text spamming (Sentinel-1 and Sentinel-3)
-SPAM_CHANNEL_ID = "1487672527370322132"
+SPAM_CHANNEL_ID = "1488606312563736646"
 
 tokens = {
     "Sentinel-1": {"token": os.getenv("TOKEN_ONE"), "channel": VC_ONE_ID, "mobile": True, "spam": True},
