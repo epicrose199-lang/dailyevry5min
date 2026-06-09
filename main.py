@@ -1,4 +1,4 @@
-import os, json, time, threading, websocket, requests, random
+import os, json, time, threading, websocket, requests, random, re
 from flask import Flask
 
 app = Flask('')
@@ -17,12 +17,12 @@ MY_USER_ID = "1404189983807639672"
 # Options: "online", "idle", "dnd", "invisible" (for offline)
 STATUS = "invisible" 
 
-# Hardcoded Home VCs for locking
-VC_ONE_ID = "1505201571577987132"
+# Hardcoded Home VCs for locking (Updated: 1 and 3 match)
+VC_ONE_ID = "1488606312563736646"
 VC_TWO_ID = "1465180321124454486"
-VC_THREE_ID = "1505201571577987132"
+VC_THREE_ID = "1488606312563736646"
 
-# New Target Channel for background text spamming (Sentinel-1 and Sentinel-3)
+# Target Channel for background text spamming (Sentinel-1 and Sentinel-3)
 SPAM_CHANNEL_ID = "1488606312563736646"
 
 tokens = {
@@ -30,6 +30,11 @@ tokens = {
     "Sentinel-2": {"token": os.getenv("TOKEN_TWO"), "channel": VC_TWO_ID, "mobile": False, "spam": False},
     "Sentinel-3": {"token": os.getenv("TOKEN_THREE"), "channel": VC_THREE_ID, "mobile": True, "spam": True}
 }
+
+# --- TRACKING STATES FOR HOT-REJOIN / MOVEMENT OVERRIDES ---
+channels_state = {name: data["channel"] for name, data in tokens.items()}
+leave_lockouts = {name: {"temp_leave": False, "timeout_until": 0} for name in tokens.keys()}
+user_current_vc = None  # Tracks your current voice channel globally via gateways
 
 # --- BACKGROUND SPAMMER FUNCTION ---
 def spammer_worker(token, name):
@@ -95,11 +100,21 @@ def click_confirm_button(token, msg_data):
         pass
 
 # --- MAIN VC LOCKER FUNCTION ---
-def vc_locker(token, home_channel, name, is_mobile):
+def vc_locker(token, initial_home_channel, name, is_mobile):
+    global user_current_vc
     if not token: return
 
     while True:
         try:
+            # Check if this specific thread is in a 5raj 1-minute timeout block
+            if leave_lockouts[name]["temp_leave"]:
+                if time.time() < leave_lockouts[name]["timeout_until"]:
+                    time.sleep(2)
+                    continue
+                else:
+                    leave_lockouts[name]["temp_leave"] = False
+                    print(f"⏰ 1 minute up. Rejoining target VC for {name}...")
+
             ws = websocket.WebSocket()
             ws.connect('wss://gateway.discord.gg/?v=9&encoding=json', timeout=15)
             
@@ -114,14 +129,14 @@ def vc_locker(token, home_channel, name, is_mobile):
                 "d": {
                     "token": token.strip(), 
                     "properties": properties,
-                    # Dynamic status pulled from global variable
                     "presence": {"status": STATUS, "afk": False} 
                 }
             }))
 
+            current_target = channels_state[name]
             join_payload = {
                 "op": 4, "d": {
-                    "guild_id": GUILD_ID, "channel_id": home_channel,
+                    "guild_id": GUILD_ID, "channel_id": current_target,
                     "self_mute": False, "self_deaf": False,
                     "self_video": False, "self_stream": not is_mobile
                 }
@@ -130,8 +145,13 @@ def vc_locker(token, home_channel, name, is_mobile):
             last_heartbeat = 0
             last_dice_roll = 0
             user_id = None
+            alt_current_vc = current_target
             
             while True:
+                # Force close loop connection if internal state changes dynamically (via commands)
+                if channels_state[name] != current_target or leave_lockouts[name]["temp_leave"]:
+                    break
+
                 msg = ws.recv()
                 if not msg: break
                 data = json.loads(msg)
@@ -140,7 +160,6 @@ def vc_locker(token, home_channel, name, is_mobile):
                 t = data.get('t')
                 d = data.get('d')
 
-                # SAFE DELAY FIX: Let the handshake complete before slamming the voice channel payload
                 if op == 10:
                     time.sleep(2) 
                     ws.send(json.dumps(join_payload))
@@ -148,11 +167,10 @@ def vc_locker(token, home_channel, name, is_mobile):
                 if t == "READY":
                     user_id = d['user']['id']
                     print(f"✅ {name} online (Status: {STATUS}).")
-                    # Fallback backup join command once session state confirms active
                     time.sleep(1)
                     ws.send(json.dumps(join_payload))
 
-                # --- REMOTE CONTROL LISTENER ---
+                # --- REMOTE CONTROL PARSER & TRANSLATOR ---
                 if t == "MESSAGE_CREATE":
                     author_id = d.get('author', {}).get('id')
                     content = d.get('content', '').strip()
@@ -160,8 +178,92 @@ def vc_locker(token, home_channel, name, is_mobile):
                     msg_guild_id = d.get('guild_id')
 
                     if msg_guild_id == GUILD_ID and author_id == MY_USER_ID:
+                        lower_content = content.lower()
+                        
+                        # Command: daily
                         if content == "daily":
                             send_chat_message(token, text_channel, "d")
+
+                        # Command: 5raj (Leave for 1 min if you share the channel)
+                        elif lower_content == "5raj":
+                            if user_current_vc and alt_current_vc and user_current_vc == alt_current_vc:
+                                print(f"🚫 {name} leaving VC for 1 minute by owner's command.")
+                                leave_lockouts[name]["temp_leave"] = True
+                                leave_lockouts[name]["timeout_until"] = time.time() + 60
+                                
+                                # Disconnect command payload
+                                leave_payload = {
+                                    "op": 4, "d": {
+                                        "guild_id": GUILD_ID, "channel_id": None,
+                                        "self_mute": False, "self_deaf": False
+                                    }
+                                }
+                                ws.send(json.dumps(leave_payload))
+                                break
+
+                        # Command: aji (Return or Transfer)
+                        elif lower_content.startswith("aji"):
+                            # Condition A: Targeted move "aji <@id> channel_id"
+                            if f"<@{user_id}>" in content or f"<@!{user_id}>" in content:
+                                match = re.search(r'\d+$', content)
+                                if match:
+                                    target_vc = match.group()
+                                    print(f"🚀 Targeted transfer for {name} -> {target_vc}")
+                                    leave_lockouts[name]["temp_leave"] = False
+                                    channels_state[name] = target_vc
+                                    break
+                            
+                            # Condition B: Global recovery "aji"
+                            elif lower_content == "aji":
+                                if leave_lockouts[name]["temp_leave"]:
+                                    print(f"🍃 Break lockout early for {name}.")
+                                    leave_lockouts[name]["temp_leave"] = False
+                                    break
+
+                        # Leaderboard Utilities
+                        elif lower_content == "lb chat": send_chat_message(token, text_channel, "&lb chat")
+                        elif lower_content == "lb vc":   send_chat_message(token, text_channel, "&lb voice")
+                        elif lower_content == "lb net":  send_chat_message(token, text_channel, "&lb networth")
+                        elif lower_content == "lb xp":   send_chat_message(token, text_channel, "&lb xp")
+
+                        # Simple Utilities
+                        elif lower_content == "hidi": send_chat_message(token, text_channel, ".v hide")
+                        elif lower_content == "sd":   send_chat_message(token, text_channel, ".v lock")
+                        elif lower_content == "7l":   send_chat_message(token, text_channel, ".v unlock")
+
+                        # Complex Shortcuts (With Target ID Fallback parsing)
+                        elif lower_content == "7yd co" or lower_content.startswith("7yd co "):
+                            target = content[6:].strip() if len(content) > 6 else MY_USER_ID
+                            send_chat_message(token, text_channel, f".v cowner remove {target}")
+                        elif lower_content == "perm" or lower_content.startswith("perm "):
+                            target = content[4:].strip() if len(content) > 4 else MY_USER_ID
+                            send_chat_message(token, text_channel, f".v perm {target}")
+                        elif lower_content == "reject" or lower_content.startswith("reject "):
+                            target = content[6:].strip() if len(content) > 6 else MY_USER_ID
+                            send_chat_message(token, text_channel, f".v reject {target}")
+                        elif lower_content == "co" or lower_content.startswith("co "):
+                            target = content[2:].strip() if len(content) > 2 else MY_USER_ID
+                            send_chat_message(token, text_channel, f".v cowner add {target}")
+                        
+                        # Single-Letter Text Command Shortcuts
+                        elif lower_content == "a" or lower_content.startswith("a "):
+                            target = content[1:].strip() if len(content) > 1 else MY_USER_ID
+                            send_chat_message(token, text_channel, f"a {target}")
+                        elif lower_content == "p" or lower_content.startswith("p "):
+                            target = content[1:].strip() if len(content) > 1 else MY_USER_ID
+                            send_chat_message(token, text_channel, f"p {target}")
+                        elif lower_content == "c" or lower_content.startswith("c "):
+                            target = content[1:].strip() if len(content) > 1 else MY_USER_ID
+                            send_chat_message(token, text_channel, f"c {target}")
+                        elif lower_content == "b" or lower_content.startswith("b "):
+                            target = content[1:].strip() if len(content) > 1 else MY_USER_ID
+                            send_chat_message(token, text_channel, f"b {target}")
+                        elif lower_content == "r" or lower_content.startswith("r "):
+                            target = content[1:].strip() if len(content) > 1 else MY_USER_ID
+                            send_chat_message(token, text_channel, f"r {target}")
+                        elif lower_content == "u" or lower_content.startswith("u "):
+                            target = content[1:].strip() if len(content) > 1 else MY_USER_ID
+                            send_chat_message(token, text_channel, f"u {target}")
 
                 # --- SAFE BUTTON DETECTION ---
                 if t in ["MESSAGE_UPDATE", "MESSAGE_CREATE"]:
@@ -173,17 +275,23 @@ def vc_locker(token, home_channel, name, is_mobile):
                                 time.sleep(0.5)
                                 click_confirm_button(token, d)
 
-                # --- SMART REJOIN LOGIC ---
+                # --- SMART REJOIN / TRACKING LOGIC ---
                 if t == "VOICE_STATE_UPDATE":
+                    # Track your current location globally to handle 5raj isolation checks
+                    if d.get('user_id') == MY_USER_ID:
+                        user_current_vc = d.get('channel_id')
+
                     if d.get('user_id') == user_id:
-                        new_channel = d.get('channel_id')
+                        alt_current_vc = d.get('channel_id')
                         
-                        if new_channel is None:
-                            print(f"🚫 {name} was kicked. Rejoining {home_channel}...")
+                        if alt_current_vc is None and not leave_lockouts[name]["temp_leave"]:
+                            print(f"🚫 {name} was kicked. Rejoining {channels_state[name]}...")
                             time.sleep(1)
                             ws.send(json.dumps(join_payload))
-                        elif new_channel != home_channel:
-                            print(f"📍 {name} was moved. Staying in new VC.")
+                        elif alt_current_vc and alt_current_vc != channels_state[name]:
+                            print(f"📍 {name} shifted. Syncing target VC tracking.")
+                            channels_state[name] = alt_current_vc
+                            current_target = alt_current_vc
 
                 if time.time() - last_dice_roll > 60:
                     if random.randint(1, 400) == 77:
@@ -196,7 +304,7 @@ def vc_locker(token, home_channel, name, is_mobile):
                     last_heartbeat = time.time()
 
             ws.close()
-            time.sleep(random.randint(400, 450))
+            time.sleep(random.randint(5, 10) if leave_lockouts[name]["temp_leave"] else random.randint(400, 450))
 
         except:
             time.sleep(20)
@@ -212,4 +320,3 @@ if __name__ == "__main__":
             time.sleep(random.randint(5, 15))
             
     while True: time.sleep(1)
-            
